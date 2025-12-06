@@ -4,7 +4,7 @@ from datetime import datetime
 from sim_core import (
     load_clean_flights,
     generate_timeline_for_flight,
-    format_dt,  # 24h + date, used for ops timeline
+    format_dt,
 )
 
 
@@ -16,8 +16,6 @@ def inject_custom_css():
     st.markdown(
         """
         <style>
-
-
         .aa-title {
             font-size: 2.2rem;
             font-weight: 700;
@@ -33,8 +31,6 @@ def inject_custom_css():
             opacity: 0.85;
             max-width: 700px;
         }
-
-
 
         .aa-card-title-badge {
             display:inline-block;
@@ -106,7 +102,6 @@ def inject_custom_css():
         .aa-table th, .aa-table td {
             font-size: 0.86rem;
         }
-
         </style>
         """,
         unsafe_allow_html=True,
@@ -114,12 +109,12 @@ def inject_custom_css():
 
 
 def render_confidence_pill(bucket: str):
-    """Render a colored confidence chip with only the bucket (no numeric score)."""
+    """Render a colored confidence chip with only the bucket."""
     color_map = {
-        "HIGH": "#2ecc71",      # green
-        "MEDIUM": "#f1c40f",    # yellow
-        "LOW": "#e67e22",       # orange
-        "VERY LOW": "#e74c3c",  # red
+        "HIGH": "#2ecc71",
+        "MEDIUM": "#f1c40f",
+        "LOW": "#e67e22",
+        "VERY LOW": "#e74c3c",
     }
     bg_color = color_map.get(bucket, "#95a5a6")
 
@@ -164,13 +159,13 @@ def fmt_mdy(dt_obj: datetime) -> str:
 def main():
     st.set_page_config(
         page_title="AA ETD Simulator",
-        page_icon=None,
+        page_icon="✈️",
         layout="wide",
     )
 
     inject_custom_css()
 
-    # Load flights from aa_flights_clean.json
+    # Load flights
     flights = load_clean_flights()
     if not flights:
         st.error("No flights found in aa_flights_clean.json")
@@ -182,8 +177,8 @@ def main():
         <div>
             <div class="aa-title">American Airlines ETD Experience Simulator</div>
             <div class="aa-subtitle">
-                American Airlines simulator for passengers to see how departure time, confidence,
-                and messaging evolve before takeoff, with an operations view built in.
+                Explore how departure time estimates, confidence levels, and passenger 
+                messaging evolve throughout the pre-departure period using real AA flight data.
             </div>
         </div>
         """,
@@ -195,16 +190,15 @@ def main():
     st.sidebar.header("Flight Selection")
 
     num_flights = len(flights)
-    st.sidebar.write(f"Flights loaded: {num_flights}")
+    st.sidebar.write(f"Total flights loaded: {num_flights}")
 
-    # Keyboard-friendly selector: click once, then use up/down arrow keys
     flight_index = st.sidebar.number_input(
         "Flight index (use ↑ / ↓ keys)",
         min_value=0,
         max_value=max(0, num_flights - 1),
         value=0,
         step=1,
-        help="Click here once, then use your keyboard arrow keys to move through flights.",
+        help="Click here once, then use arrow keys to navigate flights.",
     )
     flight_index = int(flight_index)
 
@@ -217,62 +211,54 @@ def main():
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Currently selected flight:**")
+    st.sidebar.markdown("**Currently viewing:**")
     st.sidebar.markdown(f"`[{flight_index}]` {sidebar_label}")
 
-    # Build ETD timeline for this flight
+    # Build timeline
     timeline = generate_timeline_for_flight(flight)
     if not timeline:
         st.error("No timeline data available for this flight.")
         return
 
-    # Slider values
-    minutes_options = [step["minutes_before_sched"] for step in timeline]
-    minutes_options_sorted = sorted(minutes_options, reverse=True)
-
+    # FIXED: Slider now represents actual step/snapshot index (more intuitive)
     st.sidebar.markdown("---")
-    st.sidebar.markdown("### Time Before Departure")
+    st.sidebar.markdown("### Timeline Position")
 
+    num_snapshots = len(timeline)
+    
     with st.sidebar.container():
         st.markdown(
             '<div style="font-size:0.85rem; opacity:0.8;">'
-            "Move the slider closer to departure to see how ETD and messaging change."
+            "Move forward through time to see how ETD estimates evolved as departure approached."
             "</div>",
             unsafe_allow_html=True,
         )
 
-        unique_minutes = sorted(set(minutes_options_sorted), reverse=True)
-
-        if len(unique_minutes) == 1:
-            selected_minutes = unique_minutes[0]
-            st.markdown(
-                f"*Only one ETD snapshot available for this flight (T-{selected_minutes} minutes).*"
-            )
+        if num_snapshots == 1:
+            snapshot_idx = 0
+            st.markdown("*Only one snapshot available for this flight.*")
         else:
-            min_val = min(minutes_options_sorted)
-            max_val = max(minutes_options_sorted)
-
-            step = 5
-            if max_val - min_val < step:
-                step = 1
-
             st.markdown('<div class="plane-slider">', unsafe_allow_html=True)
-            selected_minutes = st.slider(
-                "Minutes before scheduled departure",
-                min_value=min_val,
-                max_value=max_val,
-                value=max_val,
-                step=step,
+            snapshot_idx = st.slider(
+                f"Snapshot (1 to {num_snapshots})",
+                min_value=0,
+                max_value=num_snapshots - 1,
+                value=0,
+                step=1,
+                help="Move slider right to advance through time toward departure"
             )
             st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Show context
+            current_step = timeline[snapshot_idx]
+            st.sidebar.markdown(
+                f"**T-{current_step['minutes_before_sched']} minutes** "
+                f"({snapshot_idx + 1} of {num_snapshots} updates)"
+            )
 
-    # Choose closest snapshot
-    current_step = min(
-        timeline,
-        key=lambda s: abs(s["minutes_before_sched"] - selected_minutes),
-    )
+    current_step = timeline[snapshot_idx]
 
-    # Parse schedule and snapshot/predicted times for passenger-facing display
+    # Parse times
     sched_dt = parse_iso(flight.get("dep_scheduled"))
     snapshot_dt = current_step["snapshot_time"]
     predicted_dt = current_step["predicted_etd"]
@@ -300,7 +286,7 @@ def main():
             unsafe_allow_html=True,
         )
         st.markdown(
-            f'<div class="aa-label" style="margin-top:0.4rem;">Status (from AA data)</div>'
+            f'<div class="aa-label" style="margin-top:0.4rem;">Final Status</div>'
             f'<div class="aa-value">{flight.get("status", "unknown")}</div>',
             unsafe_allow_html=True,
         )
@@ -320,13 +306,13 @@ def main():
             unsafe_allow_html=True,
         )
         st.markdown(
-            f'<div class="aa-label" style="margin-top:0.4rem;">Departure Time</div>'
+            f'<div class="aa-label" style="margin-top:0.4rem;">Scheduled Departure</div>'
             f'<div class="aa-value">{fmt_12h(sched_dt)}</div>',
             unsafe_allow_html=True,
         )
 
         st.markdown(
-            f'<div class="aa-label" style="margin-top:0.6rem;">Snapshot</div>'
+            f'<div class="aa-label" style="margin-top:0.6rem;">Current Snapshot</div>'
             f'<div class="aa-value">T-{current_step["minutes_before_sched"]} minutes</div>',
             unsafe_allow_html=True,
         )
@@ -349,7 +335,7 @@ def main():
 
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ETD Confidence (bucket only)
+    # ETD Confidence
     with col_c:
         st.markdown('<div class="aa-card">', unsafe_allow_html=True)
         st.markdown(
@@ -358,12 +344,17 @@ def main():
         )
         render_confidence_pill(current_step["confidence_bucket"])
         st.markdown(
-            f'<div class="aa-label" style="margin-top:0.7rem;">ETD changes so far</div>'
+            f'<div class="aa-label" style="margin-top:0.7rem;">ETD Updates So Far</div>'
             f'<div class="aa-value">{current_step["num_changes"]}</div>',
             unsafe_allow_html=True,
         )
         st.markdown(
-            f'<div class="aa-label" style="margin-top:0.4rem;">Delay driver</div>'
+            f'<div class="aa-label" style="margin-top:0.4rem;">Largest Change</div>'
+            f'<div class="aa-value">{current_step["max_change_seen"]} minutes</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="aa-label" style="margin-top:0.4rem;">Delay Category</div>'
             f'<div class="aa-value">{current_step["cause_tag"]}</div>',
             unsafe_allow_html=True,
         )
@@ -371,13 +362,17 @@ def main():
 
     st.markdown("")
 
-    # ---------------- PASSENGER VIEW: TWO CARDS SIDE BY SIDE ----------------
+    # ---------------- PASSENGER VIEW ----------------
+    st.markdown("### 👤 Passenger Experience")
+    st.markdown("*What a passenger would see at this point in time:*")
+    st.markdown("")
+    
     p_col1, p_col2 = st.columns(2)
 
     with p_col1:
         st.markdown('<div class="aa-card">', unsafe_allow_html=True)
         st.markdown(
-            '<div class="aa-card-title-badge">Passenger-Friendly Delay Explanation</div>',
+            '<div class="aa-card-title-badge">Why is my flight delayed?</div>',
             unsafe_allow_html=True,
         )
         st.info(current_step["cause_text"])
@@ -386,55 +381,91 @@ def main():
     with p_col2:
         st.markdown('<div class="aa-card">', unsafe_allow_html=True)
         st.markdown(
-            '<div class="aa-card-title-badge">Passenger Safe Window Messaging</div>',
+            '<div class="aa-card-title-badge">What should I do?</div>',
             unsafe_allow_html=True,
         )
         st.success(current_step["safe_window_message"])
         st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- OPS VIEW CARD ----------------
+    # ---------------- OPS VIEW ----------------
     st.markdown("")
+    st.markdown("### 👨‍✈️ Operations View")
+    st.markdown(
+        "This operational view shows how ETD evolved over time, helping gate staff "
+        "understand reliability and communicate proactively with passengers."
+    )
+    st.markdown("")
+
     st.markdown('<div class="aa-card">', unsafe_allow_html=True)
     st.markdown(
-        '<div class="aa-card-title-badge">Operational View Notes</div>',
+        '<div class="aa-card-title-badge">Operational Notes</div>',
         unsafe_allow_html=True,
     )
+    
     st.write(
-        "This view is designed for gate and operations staff to understand how "
-        "ETD has moved over time and how reliable the current estimate is."
+        "**Key Insights:**\n"
+        f"- This flight had **{current_step['num_changes']}** ETD updates\n"
+        f"- Largest single change: **{current_step['max_change_seen']}** minutes\n"
+        f"- Current confidence: **{current_step['confidence_bucket']}** "
+        f"(score: {current_step['confidence']})\n"
+        f"- Delay driver: **{current_step['cause_tag']}**"
     )
-    st.write(
-        "- Times in the table below use a 24-hour clock.\n"
-        "- High confidence with few ETD changes suggests a stable departure.\n"
-        "- Low confidence or many ETD changes signal that staff should be proactive with updates."
-    )
+    
+    if current_step['confidence_bucket'] in ('LOW', 'VERY LOW'):
+        st.warning(
+            "⚠️ Low confidence suggests proactive passenger communication is recommended. "
+            "Consider making announcements and updating gate displays frequently."
+        )
+    elif current_step['max_change_seen'] >= 30:
+        st.warning(
+            "⚠️ Large ETD changes detected. Monitor closely for additional changes and "
+            "keep passengers informed."
+        )
+    
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- OPS TIMELINE ----------------
+    # ---------------- FULL TIMELINE TABLE ----------------
     st.markdown("")
-    st.subheader("Operational ETD History (24-hour Ops View)")
+    st.subheader("📊 Complete ETD History (24-Hour Format)")
     st.markdown(
-        "The table below shows every ETD update for this flight as recorded in AA data. "
-        "T-minus indicates how many minutes before or after scheduled departure the update was made."
+        "This table shows every ETD update AA published for this flight. "
+        "Times use 24-hour format for operational clarity."
     )
 
     timeline_rows = []
-    for step in timeline:
+    for i, step in enumerate(timeline):
         timeline_rows.append(
             {
+                "Update #": i + 1,
                 "T-minus (min)": step["minutes_before_sched"],
-                "Snapshot time": format_dt(step["snapshot_time"]),  # 24h ops view
-                "Predicted ETD": format_dt(step["predicted_etd"]),  # 24h ops view
-                "Est. delay (min)": step["estimated_delay"],
-                "Conf. score": step["confidence"],
-                "Conf. bucket": step["confidence_bucket"],
-                "ETD changes so far": step["num_changes"],
+                "Snapshot Time": format_dt(step["snapshot_time"]),
+                "Predicted ETD": format_dt(step["predicted_etd"]),
+                "Delay (min)": step["estimated_delay"],
+                "Conf Score": step["confidence"],
+                "Conf Level": step["confidence_bucket"],
+                "Changes": step["num_changes"],
+                "Driver": step["cause_tag"],
             }
         )
 
     st.markdown('<div class="aa-table">', unsafe_allow_html=True)
-    st.dataframe(timeline_rows, use_container_width=True)
+    st.dataframe(timeline_rows, use_container_width=True, height=400)
     st.markdown("</div>", unsafe_allow_html=True)
+    
+    # Add summary stats at bottom
+    st.markdown("---")
+    stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+    with stat_col1:
+        st.metric("Total Updates", len(timeline))
+    with stat_col2:
+        final_delay = timeline[-1]["estimated_delay"]
+        st.metric("Final Delay", f"{final_delay} min")
+    with stat_col3:
+        max_change = max(s["max_change_seen"] for s in timeline)
+        st.metric("Max Change", f"{max_change} min")
+    with stat_col4:
+        final_conf = timeline[-1]["confidence_bucket"]
+        st.metric("Final Confidence", final_conf)
 
 
 if __name__ == "__main__":
